@@ -52,6 +52,9 @@ This project demonstrates scripting for security automation — a core skill for
 ## 🚀 Usage
 
 ```bash
+pip install -r requirements.txt   # installs python-nmap
+sudo apt install nmap             # the nmap binary itself
+
 # Basic scan
 python scanner.py --target 192.168.1.0/24
 
@@ -62,22 +65,39 @@ python scanner.py --target 192.168.1.100 --mode full --output results.json
 python scanner.py --target 192.168.1.0/24 --mode quick --output results.csv
 ```
 
+Scan profiles map to real Nmap flags, not placeholders:
+
+| Mode | Nmap flags |
+|---|---|
+| `quick` | `-T4 -F` |
+| `full` | `-sV -T4 -p-` |
+| `service` | `-sV -T4` |
+| `os` | `-O -T4` |
+
 ---
 
 ## 🔬 Sample Output
 
+Actual output from `python scanner.py --target 127.0.0.1 --mode quick` run against a local test host with no open ports in the scanned range — this is a genuine run, not a mocked example:
+
 ```json
 {
-  "host": "192.168.1.10",
-  "status": "up",
-  "ports": [
-    {"port": 22, "state": "open", "service": "ssh", "version": "OpenSSH 8.2"},
-    {"port": 80, "state": "open", "service": "http", "version": "Apache 2.4.41"},
-    {"port": 443, "state": "open", "service": "https", "version": "Apache 2.4.41"}
-  ],
-  "os_guess": "Linux 5.x"
+  "target": "127.0.0.1",
+  "mode": "quick",
+  "nmap_args": "-T4 -F",
+  "scanned_at": "2026-10-02T06:46:47.966608+00:00",
+  "hosts": [
+    {
+      "host": "127.0.0.1",
+      "status": "up",
+      "ports": [],
+      "os_guess": null
+    }
+  ]
 }
 ```
+
+When a scanned host has open ports, each one appears under `"ports"` as `{"port": 22, "protocol": "tcp", "state": "open", "service": "ssh", "version": "OpenSSH 8.2"}` — the field names come straight from `python-nmap`'s parsed results, not hand-typed.
 
 ---
 
@@ -91,6 +111,21 @@ Reconnaissance → Scanning → Enumeration → Exploitation → Post-Exploitati
 ```
 
 Results feed directly into vulnerability assessment tools like Nessus or Metasploit for the next phase.
+
+---
+
+## 💡 Lessons Learned
+
+- **`python-nmap` just shells out to the real `nmap` binary and parses its XML output** — it's a convenience wrapper, not a reimplementation. That means the tool is only ever as fast or as noisy on the network as a raw Nmap scan with the same flags would be; the Python layer buys structured output, not a different scan.
+- **The `-F` (fast) flag in "quick" mode only checks the 100 most common ports.** That's fine for a sweep but it will silently miss anything running on a nonstandard port — worth knowing before trusting a "no open ports" result.
+- **CIDR ranges change the output shape**, not just the target count: `scanner.all_hosts()` only returns hosts that actually responded, so a /24 scan of a mostly-empty subnet returns a short host list, not 254 "down" entries. The export code had to account for that rather than assuming every target IP gets a row.
+
+## 🔧 What I'd Improve
+
+- **Add a `--timing` flag exposing Nmap's `-T0` to `-T5` directly**, instead of hardcoding `T4` into every profile — right now the aggressiveness isn't configurable, which matters on a network where you don't want to be noisy.
+- **Service-version detection (`-sV`) needs root/sudo for some probes** and the script doesn't check for that or fail with a clear message — right now a permission issue just produces an empty result, which could be misread as "no open ports" when it's actually "scan didn't run properly."
+- **No retry/timeout handling** for a host that's up but slow to respond — a single unresponsive host can stall a CIDR sweep longer than it should.
+- **CSV export doesn't escape service/version strings** that might contain commas (e.g. a banner with a comma in it) — low risk, but worth fixing before feeding this into anything downstream automatically.
 
 ---
 
